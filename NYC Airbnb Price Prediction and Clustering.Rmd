@@ -1,0 +1,388 @@
+<!-- COVER PAGE -->
+<div style="text-align: center; margin-top: 50px;">
+  <img src="New_York_City_.png" width="600px" />
+  <h1 style="margin-top: 30px;">NYC Airbnb Price Prediction & Neighborhood Clustering</h1>
+  <h3>Machine Learning Project</h3>
+  <p><strong>Jenocent Edwardraj</strong></p>
+</div>
+
+<div style="page-break-after: always;"></div>
+
+---
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Introduction 🗽
+
+In this project, we explore the New York City Airbnb Open Data to answer two key questions:
+
+1. Can we predict Airbnb rental prices in NYC based on listing location, host features, and property details?
+2. Can we cluster neighborhoods based on listing behaviors such as price, availability, and room type?
+
+### About the Dataset
+
+This project uses the **New York City Airbnb Open Data**, publicly available on [Kaggle](https://www.kaggle.com/datasets/dgomonov/new-york-city-airbnb-open-data).  
+
+The dataset includes over **48,000 active listings** across all five boroughs of New York City, making it an excellent candidate for both exploratory and predictive modeling.
+
+**Key Characteristics:**
+
+- **Timeframe:** Data was collected in **2019** 
+- **Coverage:** Listings span Manhattan, Brooklyn, Queens, Bronx, and Staten Island 
+- **Variables include:** 
+  - Host and listing details (`host_id`, `neighbourhood_group`, `room_type`) 
+  - Pricing and availability (`price`, `minimum_nights`, `availability_365`) 
+  - Engagement metrics (`number_of_reviews`, `reviews_per_month`, `calculated_host_listings_count`) 
+
+This project serves as a **portfolio-level demonstration** of exploratory analysis, clustering, and supervised machine learning on a real-world dataset. Our aim is to uncover patterns in the NYC rental market and build a **predictive model for rental pricing** that reflects both listing behavior and geographic trends.
+
+
+# Data Cleaning 🧼
+
+We begin by loading all required libraries and inspecting the dataset. Then, we clean the data by removing unnecessary columns, handling missing values, and addressing extreme outliers. This ensures the dataset is ready for analysis and modeling.
+
+### Install Required Packages
+*Purpose:* Ensure that all the necessary packages are installed on the user's machine before proceeding with analysis.
+```{r, message=FALSE, warning=FALSE}
+required_packages <- c("tidyverse", "dplyr", "ggplot2", "readr", "randomForest")
+
+installed <- required_packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+```
+***Note:*** *This is a safeguard to avoid errors due to missing libraries. If knitting fails, run this chunk manually in the R console.*
+
+### Load Required Libraries
+*Purpose:* Load all the packages needed for data handling, visualization, and modeling.
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(randomForest)
+```
+
+### Load the Dataset
+*Purpose:* Load the NYC Airbnb CSV dataset into a dataframe for analysis.
+```{r}
+df <- read_csv("AB_NYC_2019.csv")
+```
+*Output:* Confirms the dataset has 48,895 rows and 16 columns. Shows data types and a preview of values.
+
+### Inspect the Structure and Missing Values
+*Purpose:* Understand the structure of the dataset and identify potential missing or improperly formatted data.
+```{r}
+str(df)
+summary(df)
+```
+*Analysis:* Reveals types of each column (e.g., numeric, character), confirming that some columns such as last_review may need type conversion or cleaning.   
+
+*Purpose:* Check for missing values in each column
+```{r}
+colSums(is.na(df))
+```
+
+### Remove Irrelevant Columns
+*Purpose:* Eliminate columns that don’t contribute meaningfully to clustering or price prediction.
+```{r}
+df_clean <- df %>%
+  select(-c(id, name, host_name, last_review))
+```
+*Analysis:* Removes metadata or redundant features to streamline the analysis.
+
+### Handle Missing Values
+*Purpose:* Drop rows with missing values to avoid issues in modeling.
+```{r}
+df_clean <- df_clean %>%
+  drop_na()
+```
+*Analysis:* Ensures data integrity. Results in a slightly reduced but complete dataset for further use.
+
+### Remove Extreme Price Outliers
+*Purpose:* Filter out extreme price values that could skew modeling and visualization.
+```{r}
+df_clean <- df_clean %>%
+  filter(price > 0, price <= 500)
+```
+*Analysis:* Removes listings with suspiciously high or zero price. Ensures more stable and generalizable model behavior.
+
+### Convert Categorical Variables to Factors
+*Purpose:* Converts text columns to factors for modeling compatibility.
+```{r}
+df_clean$neighbourhood_group <- as.factor(df_clean$neighbourhood_group)
+df_clean$neighbourhood <- as.factor(df_clean$neighbourhood)
+df_clean$room_type <- as.factor(df_clean$room_type)
+```
+*Analysis:* Ensures that modeling functions treat these as categorical variables rather than strings or numerical IDs.
+
+### Final Inspection of Cleaned Dataset
+*Purpose:* Performs a final check of the cleaned dataset to confirm data structure, column types, and variable ranges.
+```{r}
+glimpse(df_clean)
+summary(df_clean$price)
+nrow(df_clean)
+
+```
+*Analysis:* Confirms readiness for clustering and modeling. Columns are properly typed, and no missing data remains.
+
+# Non-supervised Learning: Clustering Neighborhoods with K-Means 🗺️📍️
+
+To uncover patterns in listing behavior across NYC neighborhoods, we use K-Means clustering. We cluster listings based on location, price, and availability to explore whether similar types of listings are geographically concentrated.
+
+### Prepare the Data for Clustering
+*Purpose:* Selects numeric columns that will be used to group listings based on listing behavior and availability.
+```{r}
+cluster_data <- df_clean %>%
+  select(latitude, longitude, price, minimum_nights, number_of_reviews, availability_365)
+```
+*Analysis:* Includes spatial and behavioral features that are ideal for K-Means clustering.  
+
+*Purpose:* Scale the data (important for K-Means)
+```{r}
+cluster_data_scaled <- scale(cluster_data)
+```
+
+### Determine Optimal Number of Clusters (Elbow Method)
+*Purpose:* Calculates total within-cluster sum of squares for different values of k to find the optimal number of clusters.
+```{r}
+wss <- vector()
+
+for (k in 1:10) {
+  kmeans_model <- kmeans(cluster_data_scaled, centers = k, nstart = 10)
+  wss[k] <- kmeans_model$tot.withinss
+}
+```
+*Analysis:* Used in conjunction with a plot to visually determine the “elbow” point where adding more clusters stops yielding major improvements.  
+
+*Purpose:* Plot the Elbow Curve
+```{r}
+plot(1:10, wss, type = "b", pch = 19,
+     xlab = "Number of Clusters (k)",
+     ylab = "Total Within-Cluster Sum of Squares",
+     main = "Elbow Method for Choosing Optimal k")
+```
+
+*Analysis:* The elbow plot above shows a gradual decline in the total within-cluster sum of squares (WCSS) as the number of clusters increases. While the most dramatic drop occurs between k = 1 and k = 4, the curve continues to decrease steadily and begins to flatten more noticeably around **k = 7**. This flattening suggests that adding more clusters beyond this point yields minimal improvement in compactness, making **k = 7** a reasonable choice for our final clustering model.
+
+### Apply K-Means Clustering with Chosen k
+*Purpose:* Given the observed flattening at k = 7 in the elbow plot, we proceed to apply K-Means clustering using **7 clusters**. This will allow us to segment listings into distinct behavioral groups based on features such as price, availability, and location.
+```{r}
+k <- 7
+kmeans_result <- kmeans(cluster_data_scaled, centers = k, nstart = 25)
+```
+*Analysis:* Each listing is now assigned to one of seven clusters based on listing behavior and location.  
+
+*Purpose:* Add cluster labels to original data
+```{r}
+df_clean$cluster <- as.factor(kmeans_result$cluster)
+```
+
+### Visualize Clusters on a Map
+*Purpose:* Displays the spatial distribution of the clusters using longitude and latitude.
+```{r}
+ggplot(df_clean, aes(x = longitude, y = latitude, color = cluster)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "K-Means Clusters of Airbnb Listings in NYC",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+*Analysis:* The map above reveals the spatial distribution of the 7 Airbnb listing clusters across New York City. Each cluster represents a distinct grouping based on geographic location, pricing, availability, and other listing behaviors. The visualization highlights how certain areas, such as central Manhattan or outer boroughs, share common rental characteristics, offering valuable insight into local market segmentation.
+
+### Interpretation
+K-Means clustering allowed us to segment Airbnb listings into seven distinct behavioral groups based on location and listing attributes. This unsupervised approach revealed spatial and pricing patterns that are not immediately obvious from raw data alone. Listings clustered in central Manhattan, for instance, tend to form a separate group from those in outer boroughs like Brooklyn or Queens, driven by differences in price, availability, and review activity.
+
+The geographic visualization of clusters confirmed that certain areas share common rental behaviors, which could be useful for market segmentation, pricing strategy, or regional policy planning. By uncovering these latent groupings, we gained a deeper understanding of how listing dynamics vary across NYC neighborhoods.
+
+# Supervised Learning:  Predicting Airbnb Prices (Regression) 💰📈
+To estimate how much an Airbnb listing might charge, we develop supervised regression models using key listing attributes. We begin with a linear regression model as a baseline, followed by a random forest model to account for potential non-linearities and feature interactions.
+
+### Prepare the Data for Modeling
+*Purpose:* Selects and prepares variables for use in supervised learning models.
+```{r}
+model_data <- df_clean %>%
+  select(price, neighbourhood_group, room_type, minimum_nights, number_of_reviews,
+         reviews_per_month, calculated_host_listings_count, availability_365)
+```
+*Analysis:* A curated set of features likely to influence price is isolated for regression modeling.  
+
+*Purpose:* Convert categorical variables to factors (if not already)
+```{r}
+model_data$neighbourhood_group <- as.factor(model_data$neighbourhood_group)
+model_data$room_type <- as.factor(model_data$room_type)
+```
+
+*Purpose:* Split into training and test sets
+```{r}
+set.seed(123)
+sample <- sample(c(TRUE, FALSE), nrow(model_data), replace = TRUE, prob = c(0.8, 0.2))
+train_data <- model_data[sample, ]
+test_data <- model_data[!sample, ]
+```
+
+### Build a Linear Regression Model
+*Purpose:* Fits a linear regression model to predict Airbnb prices based on the selected features.
+```{r}
+lm_model <- lm(price ~ ., data = train_data)
+```
+*Analysis:* Serves as a simple, interpretable benchmark model.
+
+*Purpose:* The summary provides insight into the coefficients and statistical significance of the linear regression model trained to predict Airbnb listing prices. It helps evaluate how each independent variable (e.g., room type, location, availability) influences the predicted price, and how well the model fits the data overall.
+
+```{r}
+summary(lm_model)
+```
+*Analysis:* The linear regression model explains approximately **40% of the variation** in listing price (Adjusted R² = 0.3976), which is acceptable for real-world pricing data that is often noisy. The **F-statistic is significant (p < 2.2e-16)**, indicating that the overall model is statistically significant.  
+
+Several predictors are statistically significant at the 0.001 level (`***`), including:
+
+- **`neighbourhood_groupManhattan`** and **`Brooklyn`**, which have positive coefficients, indicating higher prices relative to the baseline (Bronx or unspecified). 
+- **`room_typePrivate room`** and **`Shared room`**, which have strong negative coefficients, showing that these room types are significantly cheaper than **Entire home/apartment**. 
+- **`minimum_nights`** and **`number_of_reviews`** are also significant, with negative coefficients, suggesting that longer minimum stays and higher review counts are associated with lower prices.  
+
+On the other hand, **`Staten Island`** is not statistically significant (p = 0.52), implying it may not contribute meaningfully to price prediction.  
+
+While linear regression offers interpretability, the residual standard error (≈ 65.67) and modest R² suggest that a more flexible model like Random Forest may yield better predictive performance.  
+
+
+### Evaluate Model Performance
+*Purpose:* Predicts prices using the linear model and calculates RMSE and R².
+```{r}
+lm_preds <- predict(lm_model, newdata = test_data)
+```
+*Analysis:* RMSE and R² values provide insight into how well the model fits unseen data.  
+
+*Purpose:* Compute RMSE and R²
+```{r}
+lm_rmse <- sqrt(mean((test_data$price - lm_preds)^2))
+lm_r2 <- 1 - sum((test_data$price - lm_preds)^2) / sum((test_data$price - mean(test_data$price))^2)
+
+lm_rmse
+lm_r2
+```
+
+### Interpretation
+The linear regression model provides a basic benchmark for predicting price. While easy to interpret, it may not capture complex feature relationships or non-linear patterns. Next, we explore a more powerful model using random forests.
+
+# Supervised Learning: Random Forest Regression 🌲🔁
+To improve on the linear regression baseline, we use a Random Forest model. Random forests are ensemble learning methods that build multiple decision trees and average their predictions, often resulting in more accurate and robust models.
+
+### Train the Random Forest Model
+*Purpose:* Builds a random forest model for predicting prices, offering better handling of non-linearity and feature interactions.
+```{r}
+set.seed(123)
+rf_model <- randomForest(price ~ ., data = train_data, ntree = 100, importance = TRUE)
+```
+*Analysis:* Typically outperforms linear models in real-world applications due to its robustness.  
+
+Purpose: This code prints the summary of the trained random forest regression model. It includes important configuration details such as the number of trees used, the number of features considered at each split, and key performance indicators like mean squared residuals and variance explained. These metrics help assess the model’s overall predictive power and training effectiveness.
+```{r}
+print(rf_model)
+```
+*Analysis:* The random forest model was trained using 100 trees and selected 2 variables at each split, which is standard for regression forests. The **mean of squared residuals is 3935.49**, indicating how far the model’s predictions deviate from actual prices on average.  
+
+The model explains approximately **45.03% of the variance** in listing prices (`% Var explained = 45.03`), which is a meaningful improvement over the linear regression model's Adjusted R² of ~40%. This confirms that the random forest captures more of the underlying structure in the data, particularly non-linear patterns and complex interactions between predictors.  
+
+Although random forests are less interpretable than linear models, this result validates their strength in predictive performance for real-world applications.  
+
+### Evaluate Performance on Test Set
+*Purpose:* Predicts prices using the random forest model and evaluates its performance.
+```{r}
+rf_preds <- predict(rf_model, newdata = test_data)
+```
+*Analysis:* Provides a basis for comparing model accuracy against linear regression.  
+
+*Purpose:* Compute RMSE and R²
+```{r}
+rf_rmse <- sqrt(mean((test_data$price - rf_preds)^2))
+rf_r2 <- 1 - sum((test_data$price - rf_preds)^2) / sum((test_data$price - mean(test_data$price))^2)
+
+rf_rmse
+rf_r2
+```
+
+### Importance Plot
+*Purpose:* This plot displays the relative importance of each feature in the trained random forest regression model. It is based on two measures: Mean Decrease in Mean Squared Error (`%IncMSE`) and Increase in Node Purity (`IncNodePurity`). These metrics help us understand which variables the model relies on most to reduce prediction error and split decision nodes effectively.
+```{r}
+varImpPlot(rf_model, main = "Variable Importance – Random Forest")
+```
+
+*Analysis:* According to the random forest model, **`room_type`** is the most important variable in predicting Airbnb listing price, followed by **`neighbourhood_group`** and **`availability_365`**. This aligns with real-world intuition, entire homes and central boroughs generally cost more, and highly available listings tend to follow predictable pricing trends.  
+
+Other features such as **`minimum_nights`**, **`number_of_reviews`**, and **`calculated_host_listings_count`** contribute meaningfully but to a lesser extent. Their lower influence suggests that while guest engagement and host activity matter, they are not as strong price predictors as location and accommodation type.  
+
+This plot confirms that the random forest model captures key drivers of price variation, helping validate the model's reliability and interpretability. 
+
+
+### Interpretation
+The Random Forest model outperforms the linear regression model in both RMSE and R², suggesting better predictive accuracy and ability to handle non-linearities. Additionally, the feature importance plot highlights which variables most strongly influence rental prices, providing valuable insight into Airbnb market behavior.
+
+# Conclusion 📝
+This analysis explored Airbnb rental behavior in New York City through both unsupervised and supervised machine learning techniques, using a dataset of over 48,000 listings. Our goal was twofold: identify underlying patterns in listing behavior using clustering, and predict listing prices based on property and host attributes.
+
+### Clustering Insights
+We applied K-Means clustering and identified **7 distinct clusters**, which revealed clear geographic and behavioral patterns among listings. The spatial visualization showed that certain clusters are more prevalent in central Manhattan, while others dominate outer boroughs like Brooklyn and Queens. These clusters were differentiated by features such as average price, minimum stay requirements, and availability.
+
+```{r, fig.width=7, fig.height=5}
+# Replot the cluster map
+ggplot(df_clean, aes(x = longitude, y = latitude, color = cluster)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "K-Means Clustering of Airbnb Listings in NYC",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+This spatial segmentation supports potential use cases such as regional marketing strategies for hosts or pricing analytics for rental platforms.
+
+### Price Prediction Performance
+We built two supervised regression models, a *Linear Regression* and a *Random Forest*, to predict listing prices.  
+
+**Compare RMSE side by side**  
+
+*Purpose:* This table provides a side-by-side comparison of the two regression models used in this project: Linear Regression and Random Forest. By comparing Root Mean Squared Error (RMSE) and R-Squared (R²), we can assess how well each model predicts Airbnb prices and determine which offers better performance.
+```{r}
+model_compare <- data.frame(
+  Model = c("Linear Regression", "Random Forest"),
+  RMSE = c(lm_rmse, rf_rmse),
+  R_Squared = c(lm_r2, rf_r2)
+)
+
+knitr::kable(model_compare, caption = "Model Performance Comparison")
+```
+*Analysis:* The table shows that the **Random Forest model** outperforms the **Linear Regression model** on both key metrics:  
+
+- **RMSE** is lower (60.04 vs. 63.33), meaning predictions are on average closer to actual prices.
+- **R²** is higher (0.47 vs. 0.41), indicating that the random forest explains a greater portion of the variance in the target variable.  
+
+This performance gain is expected, as random forests are capable of modeling non-linear interactions and complex relationships that a linear model cannot. Additionally, random forests provide insights into **feature importance**, which helps interpret what drives pricing differences across listings.  
+
+These results suggest that while linear regression provides a transparent baseline, random forest offers better accuracy and should be the preferred model for price prediction in this context.  
+
+### Final Thoughts
+
+In summary, both goals of this project were achieved: we successfully predicted Airbnb rental prices using supervised learning and identified distinct neighborhood groupings through unsupervised clustering.  
+
+This project demonstrated how machine learning can uncover patterns and support informed decision-making in real estate markets. Cluster analysis revealed geographic and behavioral structure in listing data, while regression models delivered actionable price predictions.  
+
+These insights can help hosts set competitive prices, assist travelers in identifying fair-value neighborhoods, and enable platforms like Airbnb to optimize market dynamics.  
+
+
+#### Future Work
+
+Potential next steps for extending this project include:
+
+- Incorporating temporal data (e.g., seasonality, booking dates) 
+- Applying neural networks or gradient boosting models for improved accuracy 
+- Conducting residual analysis to detect local anomalies or outliers in pricing 
+
+# Thank You 🤝
+
+Thank you for taking the time to review this project. This analysis was both a technical and conceptual learning experience, blending data cleaning, visualization, clustering, and regression modeling to extract insights from a real-world dataset.
+
+I hope this report demonstrated not only the predictive potential of machine learning in the context of short-term rentals, but also how thoughtful data storytelling can support decision-making in practical domains like real estate and tourism.
+
+If you have any questions or feedback, feel free to reach out to me at: **jenocent.work@gmail.com**
+
+
